@@ -150,39 +150,60 @@ All paths you provide should be relative to the working directory. You do not ne
         ]
     )
 
+    # Initialize messages with system prompt and user query
     messages = [
         types.Content(role="user", parts=[types.Part(text=args.prompt)])
     ]
 
     api_key = os.environ.get("GEMINI_API_KEY")
     client = genai.Client(api_key=api_key)
-    response = client.models.generate_content(
-        model="gemini-2.0-flash-001",
-        contents=messages,
-        config=types.GenerateContentConfig(
-            tools=[available_functions],
-            system_instruction=system_prompt
-        )
-    )
 
     if args.verbose:
         print("User prompt:", args.prompt)
-        print("Prompt tokens:", response.usage_metadata.prompt_token_count)
-        print("Response tokens:", response.usage_metadata.candidates_token_count)
-    
-    print("Response:")
-    
-    # Check for function calls
-    if response.candidates and response.candidates[0].content.parts:
+
+    # Main conversation loop
+    for iteration in range(20):  # Maximum 20 iterations
+        if args.verbose:
+            print(f"\nIteration {iteration + 1}/20")
+
+        response = client.models.generate_content(
+            model="gemini-2.0-flash-001",
+            contents=messages,
+            config=types.GenerateContentConfig(
+                tools=[available_functions],
+                system_instruction=system_prompt
+            )
+        )
+
+        if args.verbose:
+            print("Prompt tokens:", response.usage_metadata.prompt_token_count)
+            print("Response tokens:", response.usage_metadata.candidates_token_count)
+
+        # Add the LLM's response to the conversation
+        for candidate in response.candidates:
+            messages.append(candidate.content)
+
+        # Check if the LLM wants to call a function
+        function_called = False
         for part in response.candidates[0].content.parts:
-            if hasattr(part, 'function_call'):
+            if hasattr(part, 'function_call') and part.function_call is not None:
+                function_called = True
                 function_call_result = call_function(part.function_call, args.verbose)
                 if not hasattr(function_call_result.parts[0], 'function_response'):
                     raise Exception("Invalid function call result format")
                 if args.verbose:
                     print(f"-> {function_call_result.parts[0].function_response.response}")
-            else:
-                print(part.text)
+                # Add the function result to the conversation
+                messages.append(function_call_result)
+
+        # If no function was called, we're done
+        if not function_called:
+            print("\nFinal response:")
+            print(response.text)
+            break
+
+    if iteration == 19:
+        print("\nReached maximum iterations (20). The agent may not have completed its task.")
 
 
 if __name__ == "__main__":
