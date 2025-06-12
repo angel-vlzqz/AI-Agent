@@ -9,6 +9,57 @@ from functions.get_file_content import get_file_content
 from functions.run_python import run_python_file
 from functions.write_file import write_file
 
+def call_function(function_call_part, verbose=False):
+    # Map of function names to their implementations
+    functions = {
+        "get_files_info": get_files_info,
+        "get_file_content": get_file_content,
+        "run_python_file": run_python_file,
+        "write_file": write_file,
+    }
+
+    function_name = function_call_part.name
+    args = function_call_part.args.copy()
+    args["working_directory"] = "./calculator"
+
+    if verbose:
+        print(f"Calling function: {function_name}({args})")
+    else:
+        print(f" - Calling function: {function_name}")
+
+    if function_name not in functions:
+        return types.Content(
+            role="tool",
+            parts=[
+                types.Part.from_function_response(
+                    name=function_name,
+                    response={"error": f"Unknown function: {function_name}"},
+                )
+            ],
+        )
+
+    try:
+        function_result = functions[function_name](**args)
+        return types.Content(
+            role="tool",
+            parts=[
+                types.Part.from_function_response(
+                    name=function_name,
+                    response={"result": function_result},
+                )
+            ],
+        )
+    except Exception as e:
+        return types.Content(
+            role="tool",
+            parts=[
+                types.Part.from_function_response(
+                    name=function_name,
+                    response={"error": str(e)},
+                )
+            ],
+        )
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--verbose', action='store_true', help='Enable verbose output')
@@ -125,20 +176,11 @@ All paths you provide should be relative to the working directory. You do not ne
     if response.candidates and response.candidates[0].content.parts:
         for part in response.candidates[0].content.parts:
             if hasattr(part, 'function_call'):
-                print(f"Calling function: {part.function_call.name}({part.function_call.args})")
-                # Execute the function call
-                if part.function_call.name == "get_files_info":
-                    result = get_files_info(".", part.function_call.args.get("directory", "."))
-                    print(result)
-                elif part.function_call.name == "get_file_content":
-                    result = get_file_content(".", part.function_call.args.get("file_path"))
-                    print(result)
-                elif part.function_call.name == "run_python_file":
-                    result = run_python_file(".", part.function_call.args.get("file_path"))
-                    print(result)
-                elif part.function_call.name == "write_file":
-                    result = write_file(".", part.function_call.args.get("file_path"), part.function_call.args.get("content"))
-                    print(result)
+                function_call_result = call_function(part.function_call, args.verbose)
+                if not hasattr(function_call_result.parts[0], 'function_response'):
+                    raise Exception("Invalid function call result format")
+                if args.verbose:
+                    print(f"-> {function_call_result.parts[0].function_response.response}")
             else:
                 print(part.text)
 
